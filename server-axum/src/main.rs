@@ -1,4 +1,10 @@
-use axum::{extract::Path, routing::get, Extension, Router};
+use axum::{
+    extract::{self, Path},
+    routing::{get, post},
+    Extension, Json, Router,
+};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use std::{
     net::SocketAddr,
@@ -20,12 +26,35 @@ async fn count(Extension(state): Extension<Arc<AppState>>) -> String {
     format!("Hello, count: {count}")
 }
 
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+struct CreateRecord {
+    name: String,
+}
+
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+struct RecordCreated {
+    id: u64,
+    name: String,
+    ts: DateTime<Utc>,
+}
+
+async fn create_record(extract::Json(payload): extract::Json<CreateRecord>) -> Json<RecordCreated> {
+    let CreateRecord { name, .. } = payload;
+    let record = RecordCreated {
+        id: 1234,
+        name,
+        ts: Utc::now(),
+    };
+    Json(record)
+}
+
 #[tokio::main]
 async fn main() {
     let shared_state = Arc::new(AppState::default());
     let app = Router::new()
         .route("/hello/:name", get(greet))
         .route("/count", get(count))
+        .route("/record/create", post(create_record))
         .layer(Extension(shared_state));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
@@ -39,9 +68,9 @@ async fn main() {
 mod tests {
     use std::sync::Arc;
 
-    use axum::{extract::Path, Extension};
+    use axum::{extract::Path, Extension, Json};
 
-    use crate::{count, greet, AppState};
+    use crate::{count, create_record, greet, AppState, CreateRecord};
 
     #[tokio::test]
     async fn test_hello() {
@@ -58,5 +87,17 @@ mod tests {
             let result = count(Extension(shared_state.clone())).await;
             assert_eq!(result, format!("Hello, count: {i}"));
         }
+    }
+
+    #[tokio::test]
+    async fn test_create_record() {
+        let name = "test_record";
+        let req = CreateRecord {
+            name: name.to_string(),
+        };
+        let result = create_record(Json(req)).await;
+        let Json(result) = result;
+        assert_eq!(result.name.as_str(), name);
+        println!("{:?}", result);
     }
 }
