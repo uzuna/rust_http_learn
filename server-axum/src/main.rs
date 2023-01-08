@@ -1,5 +1,6 @@
 use axum::{
     extract::{self, Path},
+    http::StatusCode,
     routing::{get, post},
     Extension, Json, Router,
 };
@@ -48,6 +49,21 @@ async fn create_record(extract::Json(payload): extract::Json<CreateRecord>) -> J
     Json(record)
 }
 
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+struct TryBody {
+    success: bool,
+}
+
+async fn try_request(
+    extract::Json(payload): extract::Json<TryBody>,
+) -> Result<Json<TryBody>, (StatusCode, String)> {
+    if payload.success {
+        Ok(Json(payload))
+    } else {
+        Err((StatusCode::BAD_REQUEST, "request failed".to_string()))
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let shared_state = Arc::new(AppState::default());
@@ -55,6 +71,7 @@ async fn main() {
         .route("/hello/:name", get(greet))
         .route("/count", get(count))
         .route("/record/create", post(create_record))
+        .route("/try", post(try_request))
         .layer(Extension(shared_state));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
@@ -68,9 +85,9 @@ async fn main() {
 mod tests {
     use std::sync::Arc;
 
-    use axum::{extract::Path, Extension, Json};
+    use axum::{extract::Path, http::StatusCode, Extension, Json};
 
-    use crate::{count, create_record, greet, AppState, CreateRecord};
+    use crate::{count, create_record, greet, try_request, AppState, CreateRecord, TryBody};
 
     #[tokio::test]
     async fn test_hello() {
@@ -99,5 +116,23 @@ mod tests {
         let Json(result) = result;
         assert_eq!(result.name.as_str(), name);
         println!("{:?}", result);
+    }
+
+    #[tokio::test]
+    async fn test_try_request() {
+        let tt = vec![TryBody { success: true }, TryBody { success: false }];
+
+        for t in tt {
+            let result = try_request(Json(t)).await;
+            match result {
+                Ok(x) => {
+                    assert!(x.success);
+                }
+                Err((status, body)) => {
+                    assert_eq!(status, StatusCode::BAD_REQUEST);
+                    assert_eq!(body.as_str(), "request failed");
+                }
+            }
+        }
     }
 }
