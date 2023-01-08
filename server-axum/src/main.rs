@@ -10,7 +10,7 @@ struct AppState {
     count: u64,
 }
 
-async fn hello(Path(name): Path<String>) -> String {
+async fn greet(Path(name): Path<String>) -> String {
     format!("Hello, {}!", name)
 }
 
@@ -24,7 +24,7 @@ async fn count(Extension(state): Extension<Arc<Mutex<AppState>>>) -> String {
 async fn main() {
     let shared_state = Arc::new(Mutex::new(AppState::default()));
     let app = Router::new()
-        .route("/hello/:name", get(hello))
+        .route("/hello/:name", get(greet))
         .route("/count", get(count))
         .layer(Extension(shared_state));
 
@@ -33,4 +33,19 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::extract::Path;
+
+    use crate::greet;
+
+    #[tokio::test]
+    async fn test_hello() {
+        // こちらは関数の単体テストが出来る
+        // actixとは粒度が違う
+        let result = greet(Path("test".to_string())).await;
+        assert_eq!(result.as_str(), "Hello, test!");
+    }
 }

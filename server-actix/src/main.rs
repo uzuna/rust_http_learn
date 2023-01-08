@@ -32,3 +32,30 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use std::future;
+
+    use crate::greet;
+    use actix_web::{body::MessageBody, rt::pin, test, web, App};
+
+    #[actix_web::test]
+    async fn test_hello() {
+        // serviceをテストするのでinit_service, call_serviceを使う
+        let app = test::init_service(App::new().service(greet)).await;
+        let req = test::TestRequest::get().uri("/hello/test").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let body = resp.into_body();
+        pin!(body);
+
+        // first chunk
+        let bytes = future::poll_fn(|cx| body.as_mut().poll_next(cx)).await;
+        assert_eq!(
+            bytes.unwrap().unwrap(),
+            web::Bytes::from_static(b"Hello test!")
+        );
+    }
+}
