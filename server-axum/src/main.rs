@@ -64,12 +64,28 @@ async fn try_request(
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct QueryBody {
+    require: String,
+    length: u32,
+    optional: Option<String>,
+}
+
+async fn query(
+    Path(name): Path<String>,
+    extract::Query(info): extract::Query<QueryBody>,
+) -> String {
+    format!("Query name {name}, body {:?}", info)
+}
+
 #[tokio::main]
 async fn main() {
     let shared_state = Arc::new(AppState::default());
     let app = Router::new()
         .route("/hello/:name", get(greet))
         .route("/count", get(count))
+        .route("/query/:name", get(query))
         .route("/record/create", post(create_record))
         .route("/try", post(try_request))
         .layer(Extension(shared_state));
@@ -85,9 +101,15 @@ async fn main() {
 mod tests {
     use std::sync::Arc;
 
-    use axum::{extract::Path, http::StatusCode, Extension, Json};
+    use axum::{
+        extract::{self, Path},
+        http::StatusCode,
+        Extension, Json,
+    };
 
-    use crate::{count, create_record, greet, try_request, AppState, CreateRecord, TryBody};
+    use crate::{
+        count, create_record, greet, query, try_request, AppState, CreateRecord, QueryBody, TryBody,
+    };
 
     #[tokio::test]
     async fn test_hello() {
@@ -134,5 +156,17 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_query() {
+        let path = Path("queryname".to_string());
+        let query_body = extract::Query(QueryBody {
+            require: "query_body".to_string(),
+            length: 1234,
+            optional: None,
+        });
+        let result = query(path, query_body).await;
+        assert_eq!(result.as_str(), "Query name queryname, body QueryBody { require: \"query_body\", length: 1234, optional: None }");
     }
 }

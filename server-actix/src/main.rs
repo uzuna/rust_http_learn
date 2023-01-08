@@ -62,6 +62,19 @@ async fn try_request(Json(payload): Json<TryBody>) -> actix_web::Result<Json<Try
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+struct QueryBody {
+    require: String,
+    length: u32,
+    optional: Option<String>,
+}
+
+#[get("/query/{name}")]
+async fn query(name: web::Path<String>, web::Query(info): web::Query<QueryBody>) -> impl Responder {
+    format!("Query name {name}, body {:?}", info)
+}
+
 #[actix_web::main] // or #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let state = web::Data::new(AppState::default());
@@ -83,7 +96,8 @@ mod tests {
     use std::future;
 
     use crate::{
-        count, create_record, greet, try_request, AppState, CreateRecord, RecordCreated, TryBody,
+        count, create_record, greet, query, try_request, AppState, CreateRecord, RecordCreated,
+        TryBody,
     };
     use actix_web::{
         body::MessageBody,
@@ -174,5 +188,16 @@ mod tests {
                 assert_eq!(body, web::Bytes::from_static(b"request failed"));
             }
         }
+    }
+
+    #[actix_web::test]
+    async fn test_query() {
+        let app = test::init_service(App::new().service(query)).await;
+        let req = test::TestRequest::get()
+            .uri("/query/queryname?length=1234&require=query_string")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body = read_body(resp).await;
+        assert_eq!(body, web::Bytes::from_static(b"Query name queryname, body QueryBody { require: \"query_string\", length: 1234, optional: None }"));
     }
 }
