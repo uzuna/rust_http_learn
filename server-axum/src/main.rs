@@ -7,22 +7,22 @@ use std::{
 
 #[derive(Debug, Default)]
 struct AppState {
-    count: u64,
+    count: Mutex<u64>,
 }
 
 async fn greet(Path(name): Path<String>) -> String {
     format!("Hello, {}!", name)
 }
 
-async fn count(Extension(state): Extension<Arc<Mutex<AppState>>>) -> String {
-    let mut ws = state.lock().unwrap();
-    ws.count += 1;
-    format!("Hello, count: {}", ws.count)
+async fn count(Extension(state): Extension<Arc<AppState>>) -> String {
+    let mut count = state.count.lock().unwrap();
+    *count += 1;
+    format!("Hello, count: {count}")
 }
 
 #[tokio::main]
 async fn main() {
-    let shared_state = Arc::new(Mutex::new(AppState::default()));
+    let shared_state = Arc::new(AppState::default());
     let app = Router::new()
         .route("/hello/:name", get(greet))
         .route("/count", get(count))
@@ -37,9 +37,11 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use axum::extract::Path;
+    use std::sync::Arc;
 
-    use crate::greet;
+    use axum::{extract::Path, Extension};
+
+    use crate::{count, greet, AppState};
 
     #[tokio::test]
     async fn test_hello() {
@@ -47,5 +49,14 @@ mod tests {
         // actixとは粒度が違う
         let result = greet(Path("test".to_string())).await;
         assert_eq!(result.as_str(), "Hello, test!");
+    }
+
+    #[tokio::test]
+    async fn test_count() {
+        let shared_state = Arc::new(AppState::default());
+        for i in 1..3 {
+            let result = count(Extension(shared_state.clone())).await;
+            assert_eq!(result, format!("Hello, count: {i}"));
+        }
     }
 }
