@@ -1,9 +1,10 @@
-use std::sync::Mutex;
+use std::{path::PathBuf, sync::Mutex};
 
+use actix_files::NamedFile;
 use actix_web::{
     get, post,
     web::{self, Json},
-    App, HttpServer, Responder,
+    App, HttpRequest, HttpServer, Responder,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -77,6 +78,12 @@ async fn query(name: web::Path<String>, web::Query(info): web::Query<QueryBody>)
     format!("Query name {name}, body {:?}", info)
 }
 
+#[get("/files/{filename:.*}")]
+async fn index(req: HttpRequest) -> actix_web::Result<NamedFile> {
+    let path: PathBuf = req.match_info().query("filename").parse().unwrap();
+    Ok(NamedFile::open(path)?)
+}
+
 #[actix_web::main] // or #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let state = web::Data::new(AppState::default());
@@ -88,6 +95,7 @@ async fn main() -> std::io::Result<()> {
             .service(count)
             .service(create_record)
             .service(try_request)
+            .service(index)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
@@ -99,8 +107,8 @@ mod tests {
     use std::future;
 
     use crate::{
-        count, create_record, greet, query, try_request, AppState, CreateRecord, RecordCreated,
-        TryBody,
+        count, create_record, greet, index, query, try_request, AppState, CreateRecord,
+        RecordCreated, TryBody,
     };
     use actix_web::{
         body::MessageBody,
@@ -215,5 +223,16 @@ mod tests {
             resp.headers().get("middleware"),
             Some(&HeaderValue::from_str("after").unwrap())
         );
+    }
+
+    #[actix_web::test]
+    async fn test_staticfile() {
+        let app = test::init_service(App::new().service(index)).await;
+        let req = test::TestRequest::get()
+            .uri("/files/Cargo.toml")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body = read_body(resp).await;
+        assert!(body.starts_with(b"[package]"));
     }
 }

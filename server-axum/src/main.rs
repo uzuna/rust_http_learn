@@ -1,11 +1,12 @@
 use axum::{
     extract::{self, Path},
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, get_service, post},
     Extension, Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use tower_http::services::ServeDir;
 
 use std::{
     net::SocketAddr,
@@ -84,12 +85,18 @@ async fn query(
 #[tokio::main]
 async fn main() {
     let shared_state = Arc::new(AppState::default());
+    let serve_resource_dir_service =
+        get_service(ServeDir::new(".")).handle_error(|error: std::io::Error| async move {
+            (StatusCode::NOT_FOUND, format!("file not found: {}", error))
+        });
+
     let app = Router::new()
         .route("/hello/:name", get(greet))
         .route("/count", get(count))
         .route("/query/:name", get(query))
         .route("/record/create", post(create_record))
         .route("/try", post(try_request))
+        .nest_service("/files", serve_resource_dir_service)
         .layer(Extension(shared_state))
         .layer(crate::middleware::SayHi {});
 
@@ -108,10 +115,11 @@ mod tests {
         body::Body,
         extract::{self, Path},
         http::{HeaderValue, Request, StatusCode},
-        routing::get,
+        routing::{get, get_service},
         Extension, Json, Router,
     };
     use tower::ServiceExt;
+    use tower_http::services::ServeDir;
 
     use crate::{
         count, create_record, greet, query, try_request, AppState, CreateRecord, QueryBody, TryBody,
@@ -203,5 +211,26 @@ mod tests {
         );
         let body = hyper::body::to_bytes(res).await.unwrap();
         assert_eq!(&body[..], b"Hello, test!");
+    }
+
+    #[tokio::test]
+    async fn test_staticfile() {
+        let serve_resource_dir_service =
+            get_service(ServeDir::new(".")).handle_error(|error: std::io::Error| async move {
+                (StatusCode::NOT_FOUND, format!("file not found: {}", error))
+            });
+        let app = Router::new().nest_service("/files", serve_resource_dir_service);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/files/Cargo.toml")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = hyper::body::to_bytes(res).await.unwrap();
+        assert!(&body.starts_with(b"[package]"));
     }
 }
