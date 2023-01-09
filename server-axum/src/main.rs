@@ -12,6 +12,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod middleware;
+
 #[derive(Debug, Default)]
 struct AppState {
     count: Mutex<u64>,
@@ -88,7 +90,8 @@ async fn main() {
         .route("/query/:name", get(query))
         .route("/record/create", post(create_record))
         .route("/try", post(try_request))
-        .layer(Extension(shared_state));
+        .layer(Extension(shared_state))
+        .layer(crate::middleware::SayHi {});
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     axum::Server::bind(&addr)
@@ -102,10 +105,13 @@ mod tests {
     use std::sync::Arc;
 
     use axum::{
+        body::Body,
         extract::{self, Path},
-        http::StatusCode,
-        Extension, Json,
+        http::{HeaderValue, Request, StatusCode},
+        routing::get,
+        Extension, Json, Router,
     };
+    use tower::ServiceExt;
 
     use crate::{
         count, create_record, greet, query, try_request, AppState, CreateRecord, QueryBody, TryBody,
@@ -168,5 +174,34 @@ mod tests {
         });
         let result = query(path, query_body).await;
         assert_eq!(result.as_str(), "Query name queryname, body QueryBody { require: \"query_body\", length: 1234, optional: None }");
+    }
+
+    #[tokio::test]
+    async fn test_middleware() {
+        // Middleware単体ではserviceが埋められないのでテストが出来なかった。
+        // towerでは[実際にやっている例](https://github.com/tower-rs/tower-http/blob/master/tower-http/src/set_header/response.rs)
+        // があるがここではtrait boundを満たせなかった
+        // axumのコード例を見るとAppを組み立ててAppをServiceExtをからoneshotを読んでいるので踏襲
+        let app = Router::new()
+            .route("/hello/:name", get(greet))
+            .layer(crate::middleware::SayHi {});
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/hello/test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers().contains_key("middleware"));
+        assert_eq!(
+            res.headers().get("middleware"),
+            Some(&HeaderValue::from_static("after"))
+        );
+        let body = hyper::body::to_bytes(res).await.unwrap();
+        assert_eq!(&body[..], b"Hello, test!");
     }
 }

@@ -8,6 +8,8 @@ use actix_web::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+mod middleware;
+
 #[derive(Debug, Default)]
 struct AppState {
     count: Mutex<u32>,
@@ -81,6 +83,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(state.clone())
+            .wrap(crate::middleware::SayHi)
             .service(greet)
             .service(count)
             .service(create_record)
@@ -101,7 +104,7 @@ mod tests {
     };
     use actix_web::{
         body::MessageBody,
-        http::header,
+        http::header::{self, HeaderValue},
         rt::pin,
         test::{self, read_body, read_body_json},
         web, App,
@@ -199,5 +202,18 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         let body = read_body(resp).await;
         assert_eq!(body, web::Bytes::from_static(b"Query name queryname, body QueryBody { require: \"query_string\", length: 1234, optional: None }"));
+    }
+
+    #[actix_web::test]
+    async fn test_middleware() {
+        let app =
+            test::init_service(App::new().wrap(crate::middleware::SayHi).service(greet)).await;
+        let req = test::TestRequest::get().uri("/hello/test").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.headers().contains_key("middleware"));
+        assert_eq!(
+            resp.headers().get("middleware"),
+            Some(&HeaderValue::from_str("after").unwrap())
+        );
     }
 }
